@@ -6,9 +6,11 @@ import math
 
 # pygame setup
 pygame.init()
+pygame.display.set_caption("Multilateration simulation")
 screen = pygame.display.set_mode((1880, 900))
+
 base = pygame.Surface((1880, 900))
-map = base.subsurface((280, 0, 1600, 900))
+map = base.subsurface((0, 100, 1880, 800))
 
 clock = pygame.time.Clock()
 running = True
@@ -93,13 +95,14 @@ class Beacon(Node):
 
 
 class UI:
-    def __init__(self, surface: pygame.Surface):
-        self.surface = surface
-        self.font = pygame.font.Font(None, 36)
+    def __init__(self, base: pygame.Surface, map: pygame.Surface):
+        self.base = base
+        self.map = map
+        self.font = pygame.font.SysFont("Arial", 36)
 
-    def _draw_text(self, text: str, pos: pygame.Vector2, color: str = "white"):
+    def draw_text(self, text: str, pos: pygame.Vector2, color: str = "black"):
         text_surface = self.font.render(text, True, color)
-        self.surface.blit(text_surface, pos)
+        self.base.blit(text_surface, (0, 0))
     
     def draw_circles_op(self, robot, beacons: list[Beacon], color: str = "black"):
         # RGBA color: (R, G, B, Alpha)
@@ -127,7 +130,7 @@ class UI:
 
                     # Blit the circle surface to the main UI surface
                     blit_pos = beacon.pos - pygame.Vector2(diameter // 2, diameter // 2)
-                    self.surface.blit(circle_surface, blit_pos)
+                    self.map.blit(circle_surface, blit_pos)
             
             else:
                 # Calculate distance for circle radius
@@ -146,23 +149,21 @@ class UI:
 
                 # Blit the circle surface to the main UI surface
                 blit_pos = beacon.pos - pygame.Vector2(diameter // 2, diameter // 2)
-                self.surface.blit(circle_surface, blit_pos)
+                self.map.blit(circle_surface, blit_pos)
 
-true_pos = pygame.Vector2(map.get_width() / 2, map.get_height() / 2)
+robot = Node(pygame.Vector2(map.get_width() / 2, map.get_height() / 2), "red", 20, map)
 
-moving = False
+beacon1 = Beacon(pygame.Vector2(100, 300), "blue", 10, map, robot, add_noise=True, tx_power=0, path_loss_exponent=2.0)
+beacon2 = Beacon(pygame.Vector2(1000, 300), "blue", 10, map, robot, add_noise=True, tx_power=0, path_loss_exponent=2.0)
+beacon3 = Beacon(pygame.Vector2(1000, 700), "blue", 10, map, robot, add_noise=True, tx_power=0, path_loss_exponent=2.0)
+beacon4 = Beacon(pygame.Vector2(100, 700), "blue", 10, map, robot, add_noise=True, tx_power=0, path_loss_exponent=2.0)
+beacon5 = Beacon(pygame.Vector2(500, 500), "blue", 10, map, robot, add_noise=True, tx_power=0, path_loss_exponent=2.0)
 
-robot = Node(true_pos, "red", 20, map)
-
-beacon1 = Beacon(pygame.Vector2(100, 100), "blue", 10, map, robot, add_noise=True, tx_power=0, path_loss_exponent=2.0)
-beacon2 = Beacon(pygame.Vector2(1000, 100), "blue", 10, map, robot, add_noise=True, tx_power=0, path_loss_exponent=2.0)
-beacon3 = Beacon(pygame.Vector2(1000, 400), "blue", 10, map, robot, add_noise=True, tx_power=0, path_loss_exponent=2.0)
-beacon4 = Beacon(pygame.Vector2(100, 400), "blue", 10, map, robot, add_noise=True, tx_power=0, path_loss_exponent=2.0)
-beacon5 = Beacon(pygame.Vector2(500, 200), "blue", 10, map, robot, add_noise=True, tx_power=0, path_loss_exponent=2.0)
-
-UI = UI(map)
+UI = UI(base, map)
 
 draw_circles = True
+
+must_update = True
 
 while running:
     # poll for events
@@ -171,6 +172,7 @@ while running:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_c:
                 draw_circles = not draw_circles
+                must_update = True
 
         if event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:
@@ -180,6 +182,7 @@ while running:
                 beacon3.check_press()
                 beacon4.check_press()
                 beacon5.check_press()
+                must_update = True
 
         if event.type == pygame.MOUSEBUTTONUP:
             if event.button == 1:
@@ -189,34 +192,43 @@ while running:
                 beacon3.drop()
                 beacon4.drop()
                 beacon5.drop()
+                must_update = True
 
         if event.type == pygame.QUIT:
             running = False
 
-    robot.drag()
-    beacon1.drag()
-    beacon2.drag()
-    beacon3.drag()
-    beacon4.drag()
-    beacon5.drag()
+    if must_update:
+        robot.drag()
+        beacon1.drag()
+        beacon2.drag()
+        beacon3.drag()
+        beacon4.drag()
+        beacon5.drag()
 
-    screen.fill("purple")
+        screen.fill("purple")
 
-    base.fill("brown")
-    map.fill("white")
+        base.fill("brown")
+        map.fill("white")
 
-    robot.draw()
-    beacon1.draw()
-    beacon2.draw()
-    beacon3.draw()
-    beacon4.draw()
-    beacon5.draw()
+        robot.draw()
+        beacon1.draw()
+        beacon2.draw()
+        beacon3.draw()
+        beacon4.draw()
+        beacon5.draw()
 
-    if draw_circles: UI.draw_circles_op(robot, [beacon1, beacon2, beacon3, beacon4, beacon5], "black")
+        if draw_circles: UI.draw_circles_op(robot, [beacon1, beacon2, beacon3, beacon4, beacon5], "black")
 
-    screen.blit(base, (0, 0))
+        UI.draw_text("Press C to show/hide RSSI circles", pygame.Vector2(10, 10))
 
-    pygame.display.flip()
+        screen.blit(base, (0, 0))
+
+        pygame.display.flip()
+
+    
+
+    if not pygame.mouse.get_pressed()[0]:
+        must_update = False
 
     dt = clock.tick(60) / 1000
 
