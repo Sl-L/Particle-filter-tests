@@ -216,7 +216,7 @@ class UI:
             
             # Draw a background for better readability
             text_rect = text_surface.get_rect(center=(mid_point.x, mid_point.y))
-            pygame.draw.rect(self.map, (255, 255, 255), text_rect.inflate(4, 4))
+            pygame.draw.rect(self.map, "black", text_rect.inflate(4, 4))
             self.map.blit(text_surface, text_rect)
     
     def draw_circles_op(self, robot, beacons: list[Beacon], color: str = "black"):
@@ -246,7 +246,7 @@ class UI:
                     # Blit the circle surface to the main UI surface
                     blit_pos = beacon.pos - pygame.Vector2(diameter // 2, diameter // 2)
                     self.map.blit(circle_surface, blit_pos)
-            
+
             else:
                 # Calculate distance for circle radius
                 thickness = int(beacon.noise)
@@ -277,8 +277,8 @@ beacon5 = Beacon(pygame.Vector2(500, 500), "blue", 10, map, robot, add_noise=Tru
 beacons = [beacon1, beacon2, beacon3, beacon4, beacon5]
 
 # Initialize particle filter
-particle_filter = ParticleFilter(num_particles=500, 
-                               map_width=map.get_width(), 
+particle_filter = ParticleFilter(num_particles=500,
+                               map_width=map.get_width(),
                                map_height=map.get_height(),
                                beacons=beacons)
 
@@ -289,7 +289,16 @@ use_particle_filter = True
 show_particles = True
 show_distance_lines = True
 
-must_update = True
+must_recalculate = True
+
+nodes = [
+    robot,
+    beacon1,
+    beacon2,
+    beacon3,
+    beacon4,
+    beacon5
+]
 
 while running:
     dt = clock.tick(60) / 1000
@@ -300,91 +309,89 @@ while running:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_c:
                 draw_circles = not draw_circles
-                must_update = True
+                must_recalculate = True
             if event.key == pygame.K_p:
                 use_particle_filter = not use_particle_filter
-                must_update = True
+                must_recalculate = True
             if event.key == pygame.K_s:
                 show_particles = not show_particles
-                must_update = True
+                must_recalculate = False
             if event.key == pygame.K_l:
                 show_distance_lines = not show_distance_lines
-                must_update = True
+                must_recalculate = False
 
         if event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:
-                robot.check_press()
-                beacon1.check_press()
-                beacon2.check_press()
-                beacon3.check_press()
-                beacon4.check_press()
-                beacon5.check_press()
-                must_update = True
+                for i in nodes:
+                    i.check_press()
+                    if i.pressed:
+                        must_recalculate = True
+                        break
 
         if event.type == pygame.MOUSEBUTTONUP:
             if event.button == 1:
-                robot.drop()
-                beacon1.drop()
-                beacon2.drop()
-                beacon3.drop()
-                beacon4.drop()
-                beacon5.drop()
-                must_update = True
+                for i in nodes:
+                    if i.pressed:
+                        i.drop()
+                        must_recalculate = True
+                        break
 
         if event.type == pygame.QUIT:
             running = False
 
-    if must_update:
-        robot.drag()
-        beacon1.drag()
-        beacon2.drag()
-        beacon3.drag()
-        beacon4.drag()
-        beacon5.drag()
-
-        # Update particle filter if enabled
-        if use_particle_filter:
-            estimated_pos = particle_filter.update()
-            error = estimated_pos.distance_to(robot.pos) * SCALE
-            #print(f"Estimation error: {error:.1f} meters")
+    if must_recalculate:
+        for i in nodes:
+            i.drag()
 
         screen.fill("purple")
 
         base.fill("brown")
         map.fill("white")
 
-        robot.draw()
-        beacon1.draw()
-        beacon2.draw()
-        beacon3.draw()
-        beacon4.draw()
-        beacon5.draw()
+        for i in nodes:
+            i.draw()
 
-        if draw_circles: 
+        if draw_circles:
             UI.draw_circles_op(robot, beacons, "black")
         
         if show_distance_lines:
             UI.draw_distance_lines(robot, beacons, "green")
-        
-        if use_particle_filter and show_particles:
-            particle_filter.draw(map)
+    
+        if use_particle_filter:
+            if must_recalculate:
+                estimated_pos = particle_filter.update()
+                error = estimated_pos.distance_to(robot.pos)
+
+            if show_particles:
+                particle_filter.draw(map)
+            
             # Draw estimated position
             pygame.draw.circle(map, (255, 0, 255), (int(estimated_pos.x), int(estimated_pos.y)), 15, 2)
             # Draw line from estimated to true position
             pygame.draw.line(map, (255, 0, 0), robot.pos, estimated_pos, 2)
 
+            UI.draw_text(f"Estimation error: {error*SCALE:.1f} meters", pygame.Vector2(800, 60))
+
         UI.draw_text("Press C to show/hide RSSI circles", pygame.Vector2(10, 15))
         UI.draw_text("Press P to toggle particle filter", pygame.Vector2(410, 15))
         UI.draw_text("Press S to show/hide particles", pygame.Vector2(10, 45))
         UI.draw_text("Press L to show/hide distance lines", pygame.Vector2(410, 45))
-        if use_particle_filter:
-            error = estimated_pos.distance_to(robot.pos) * SCALE
-            UI.draw_text(f"Estimation error: {error:.1f} meters", pygame.Vector2(800, 60))
 
-        screen.blit(base, (0, 0))
+    mouse_pos = pygame.mouse.get_pos()
+
+    text = f"[{mouse_pos[0]:0>4}, {mouse_pos[1]:0>4}]"
+    text_surface = UI.font.render(text, True, "black")
+            
+    # Draw a background for better readability
+    text_rect = text_surface.get_rect(center=(1820, 15))
+    pygame.draw.rect(base, "brown", text_rect.inflate(4, 4))
+    base.blit(text_surface, text_rect)
+
+    screen.blit(base, (0, 0))
 
     pygame.display.flip()
 
     if not pygame.mouse.get_pressed()[0]:
-        must_update = False
+        must_recalculate = False
+
 pygame.quit()
