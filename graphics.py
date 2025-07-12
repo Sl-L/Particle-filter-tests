@@ -405,9 +405,11 @@ nodes = [
     beacon5
 ]
 
+
 recalculate_particles = True
 
-multilateration_error = 0.0
+must_multilaterate = True
+multilateration_error = None
 
 while running:
     dt = clock.tick(60) / 1000
@@ -428,16 +430,13 @@ while running:
                     recalculate_particles = True
             if event.key == pygame.K_s:
                 show_particles = not show_particles
-                recalculate_particles = False
                 must_redraw = True
             if event.key == pygame.K_l:
                 show_distance_lines = not show_distance_lines
-                recalculate_particles = False
-                must_redraw = False
+                must_redraw = True
             if event.key == pygame.K_t:
-                multilateration_error = multilateration(map, robot, beacons, 5, 100)
-                recalculate_particles = False
-                must_redraw = False
+                must_multilaterate = True
+                must_redraw = True
 
         if event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:
@@ -493,12 +492,19 @@ while running:
 
             UI.draw_text(f"Estimation error: {error*SCALE:.1f} meters", pygame.Vector2(800, 60))
 
+        if must_multilaterate:
+            multilateration_error = multilateration(map, robot, beacons, 5, 100)
+
         UI.draw_text("Press C to show/hide RSSI confidence circles", pygame.Vector2(10, 15))
         UI.draw_text("Press L to show/hide distance lines", pygame.Vector2(10, 45))
         UI.draw_text("Press P to toggle particle filter", pygame.Vector2(450, 15))
         UI.draw_text("Press S to show/hide particles", pygame.Vector2(450, 45))
         UI.draw_text("Press T to multilaterate", pygame.Vector2(1670, 45))
-        UI.draw_text(f"Estimation error: {multilateration_error*SCALE:.1f}", pygame.Vector2(1670, 70))
+
+        if multilateration_error == None:
+            UI.draw_text(f"Estimation error: Error", pygame.Vector2(1670, 70))
+        else:
+            UI.draw_text(f"Estimation error: {multilateration_error*SCALE:.1f}", pygame.Vector2(1670, 70))
 
     mouse_pos = pygame.mouse.get_pos()
 
