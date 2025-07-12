@@ -10,5 +10,9 @@
 - The particle filter implementation in `particle_filter.c` is meant for embedded
 
 ## TO-DO
+### Priority
 - Test and benchmark the particle filter implementation on a nRF5340's app core
 - Properly document usage of the implementation
+
+### If there's time
+- Add a comfortable way of changing sim setting on `graphics.py`
