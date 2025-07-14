@@ -270,19 +270,13 @@ class ParticleFilter:
     
     def estimate_position(self):
         # Estimate position as weighted average of particles
-        sum_x = 0.0
-        sum_y = 0.0
-        for i in range(self.num_particles):
-            sum_x += self.particles[i].x * self.weights[i]
-            sum_y += self.particles[i].y * self.weights[i]
+        mean = np.average(self.particles, axis=0, weights=self.weights)
         
-        self.estimated_pos = pygame.Vector2(sum_x, sum_y)
+        self.estimated_pos = pygame.Vector2(mean[0], mean[1])
         return self.estimated_pos
     
     def update(self):
-        # No prediction is done since no walking is modeled
-        # self.predict()
-
+        self.predict()
         self.update_weights()
         self.resample()
         return self.estimate_position()
@@ -396,12 +390,6 @@ beacon5 = Beacon(pygame.Vector2(1600, 161), "blue", 10, map, robot, add_noise=Tr
 
 beacons = [beacon1, beacon2, beacon3, beacon4, beacon5]
 
-# Initialize particle filter
-particle_filter = ParticleFilter(num_particles=1500,
-                               map_width=map.get_width(),
-                               map_height=map.get_height(),
-                               beacons=beacons)
-
 UI = UI(base, map, robot)
 
 draw_circles = True
@@ -419,7 +407,6 @@ nodes = [
     beacon4,
     beacon5
 ]
-
 
 recalculate_particles = True
 
@@ -497,8 +484,14 @@ while running:
         if show_distance_lines:
             UI.draw_distance_lines(beacons, "green")
     
+            
         if use_particle_filter:
             if recalculate_particles:
+                # Initialize particle filter
+                particle_filter = ParticleFilter(num_particles=1500,
+                                            map_width=map.get_width(),
+                                            map_height=map.get_height(),
+                                            beacons=beacons)
                 estimated_pos = particle_filter.update()
                 error = estimated_pos.distance_to(robot.pos)
             
