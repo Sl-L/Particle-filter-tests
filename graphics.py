@@ -373,16 +373,16 @@ def multilateration(map: pygame.Surface, robot: Node, beacons: list[Beacon], ite
 
 robot = Node(pygame.Vector2(map.get_width() / 2, map.get_height() / 2), "red", 20, map)
 
-beacon1 = Beacon(pygame.Vector2(100, 300), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
-beacon2 = Beacon(pygame.Vector2(1000, 300), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
-beacon3 = Beacon(pygame.Vector2(1000, 700), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
-beacon4 = Beacon(pygame.Vector2(100, 700), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
-beacon5 = Beacon(pygame.Vector2(500, 500), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
+beacon1 = Beacon(pygame.Vector2(750, 160), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
+beacon2 = Beacon(pygame.Vector2(120, 520), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
+beacon3 = Beacon(pygame.Vector2(540, 835), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
+beacon4 = Beacon(pygame.Vector2(1500, 820), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
+beacon5 = Beacon(pygame.Vector2(1600, 161), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
 
 beacons = [beacon1, beacon2, beacon3, beacon4, beacon5]
 
 # Initialize particle filter
-particle_filter = ParticleFilter(num_particles=500,
+particle_filter = ParticleFilter(num_particles=1500,
                                map_width=map.get_width(),
                                map_height=map.get_height(),
                                beacons=beacons)
