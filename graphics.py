@@ -3,6 +3,7 @@ import scipy
 import random
 import math
 import numpy as np
+import numpy.typing as npt
 import itertools
 
 # pygame setup
@@ -100,8 +101,111 @@ class Beacon(Node):
             distance = 10 ** ((self.tx_power - rssi) / (10 * self.path_loss_exponent)) + random.lognormvariate(0, self.noise)
             return distance / SCALE  # Convert back to pixels
 
+class UI:
+    def __init__(self, base: pygame.Surface, map: pygame.Surface, robot: Node):
+        self.base = base
+        self.map = map
+        self.robot = robot
+        self.font = pygame.font.SysFont("Arial", 24)
+        self.big_font = pygame.font.SysFont("Arial", 36)
+
+    def draw_text(self, text: str, pos: pygame.Vector2, color: str = "black", big=False):
+        font = self.big_font if big else self.font
+        text_surface = font.render(text, True, color)
+        self.base.blit(text_surface, pos)
+    
+    def draw_distance_lines(self, beacons: list[Beacon], color: str = "black"):
+        for beacon in beacons:
+            # Draw line between robot and beacon
+            pygame.draw.line(self.map, color, self.robot.pos, beacon.pos, 1)
+            
+            # Calculate distance in meters
+            distance_px = self.robot.pos.distance_to(beacon.pos)
+            distance_m = distance_px * SCALE
+            
+            # Position the text in the middle of the line
+            mid_point = (self.robot.pos + beacon.pos) / 2
+            text = f"{distance_m:.1f}m"
+            text_surface = self.font.render(text, True, color)
+            
+            # Draw a background for better readability
+            text_rect = text_surface.get_rect(center=(mid_point.x, mid_point.y))
+            pygame.draw.rect(self.map, "black", text_rect.inflate(4, 4))
+            self.map.blit(text_surface, text_rect)
+    
+    def draw_circles_op(self, beacons: list[Beacon], color: str = "black"):
+        # RGBA color: (R, G, B, Alpha)
+        if isinstance(color, str):
+            rgb = pygame.Color(color)
+        else:
+            rgb = pygame.Color(*color)
+        rgba = (rgb.r, rgb.g, rgb.b, 32)
+        
+        for beacon in beacons:
+            if beacon.add_noise:
+                for i in range(3):
+                    i1 = scipy.stats.lognorm.interval(0.95 - 0.1*i, s=beacon.sigma_ln, scale=beacon.get_true_distance())
+                    r1 = int(i1[0])
+                    r2 = int(i1[1])
+
+                    radius = ( r1 + r2 ) // 2
+                    thickness = r2 - r1
+
+                    diameter = radius * 2 + thickness * 2 + 4 # + 4 for padding
+                    circle_surface = pygame.Surface((diameter, diameter), pygame.SRCALPHA)
+                    center = (diameter // 2 , diameter // 2 )
+
+                    pygame.draw.circle(circle_surface, rgba, center, radius + thickness // 2, width=thickness)
+
+                    # Blit the circle surface to the main UI surface
+                    blit_pos = beacon.pos - pygame.Vector2(diameter // 2, diameter // 2)
+                    self.map.blit(circle_surface, blit_pos)
+
+            else:
+                # Calculate distance for circle radius
+                thickness = int(beacon.noise)
+                radius = int(beacon.get_true_distance())
+
+                # Create a transparent surface large enough for the circle
+                diameter = radius * 2 + thickness * 2 + 4 # + 4 for padding
+                circle_surface = pygame.Surface((diameter, diameter), pygame.SRCALPHA)
+
+                # Circle center on the temp surface
+                center = (diameter // 2 , diameter // 2 )
+
+                # Draw the circle outline with transparency and thickness
+                pygame.draw.circle(circle_surface, rgba, center, radius + thickness // 2, width=thickness)
+
+                # Blit the circle surface to the main UI surface
+                blit_pos = beacon.pos - pygame.Vector2(diameter // 2, diameter // 2)
+                self.map.blit(circle_surface, blit_pos)
+
+    def draw_estimation(self, estimated_pos: pygame.Vector2, covariance: np.array, color: str):
+        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+        order = eigenvalues.argsort()[::-1]
+        eigenvalues, eigenvectors = eigenvalues[order], eigenvectors[:, order]
+        
+        # Confidence scaling
+        k = np.sqrt(-2 * np.log(1 - 0.95))  # For 2D (chi-squared)
+        a = k * np.sqrt(eigenvalues[0])
+        b = k * np.sqrt(eigenvalues[1])
+        angle = np.degrees(np.arctan2(eigenvectors[1,0], eigenvectors[0,0]))
+
+        try:
+            ellipse_surf = pygame.Surface((a, b), pygame.SRCALPHA)
+            pygame.draw.ellipse(ellipse_surf, color, ellipse_surf.get_rect(), 2)
+            rotated_surf = pygame.transform.rotate(ellipse_surf, -angle)
+            rotated_rect = rotated_surf.get_rect(center=estimated_pos)
+            self.map.blit(rotated_surf, rotated_rect.topleft)
+
+        except pygame.error:
+            print("Error: confidence ellipse couldn't draw")
+        
+        pygame.draw.circle(self.map, color, estimated_pos, 4)
+        pygame.draw.line(self.map, color, self.robot.pos, estimated_pos, 2)
+
 class ParticleFilter:
-    def __init__(self, num_particles, map_width, map_height, beacons):
+    def __init__(self, num_particles: int, map_width: int, map_height: int, beacons: list[Beacon]):
         self.num_particles = num_particles
         self.map_width = map_width
         self.map_height = map_height
@@ -189,106 +293,11 @@ class ParticleFilter:
             pygame.draw.circle(surface, (100, 100, 255, 50), (int(particle.x), int(particle.y)), 2)
 
     def draw_estimate(self, surface: pygame.Surface):
-        # Draw estimated position and confidence ellipse
-        particles = np.array([list(i) for i in self.particles]).T
+        particles = np.array([list(i) for i in self.particles]) # Convert particles from List[pygame.Vector2] to np.array[[x, y]]
 
-        cov = np.cov(particles, aweights=self.weights)
+        cov = np.cov(particles.T, aweights=self.weights)
 
-        eigenvalues, eigenvectors = np.linalg.eigh(cov)
-        order = eigenvalues.argsort()[::-1]
-        eigenvalues, eigenvectors = eigenvalues[order], eigenvectors[:, order]
-        
-        # Confidence scaling
-        k = np.sqrt(-2 * np.log(1 - 0.95))  # For 2D (chi-squared)
-        a = k * np.sqrt(eigenvalues[0])
-        b = k * np.sqrt(eigenvalues[1])
-        angle = np.degrees(np.arctan2(eigenvectors[1,0], eigenvectors[0,0]))
-
-        ellipse_surf = pygame.Surface((a, b), pygame.SRCALPHA)
-        pygame.draw.ellipse(ellipse_surf, "red", ellipse_surf.get_rect(), 2)
-        rotated_surf = pygame.transform.rotate(ellipse_surf, -angle)
-        rotated_rect = rotated_surf.get_rect(center=(estimated_pos.x, estimated_pos.y))
-        surface.blit(rotated_surf, rotated_rect.topleft)
-
-        pygame.draw.circle(map, "red", (estimated_pos.x, estimated_pos.y), 4)
-
-class UI:
-    def __init__(self, base: pygame.Surface, map: pygame.Surface):
-        self.base = base
-        self.map = map
-        self.font = pygame.font.SysFont("Arial", 24)
-        self.big_font = pygame.font.SysFont("Arial", 36)
-
-    def draw_text(self, text: str, pos: pygame.Vector2, color: str = "black", big=False):
-        font = self.big_font if big else self.font
-        text_surface = font.render(text, True, color)
-        self.base.blit(text_surface, pos)
-    
-    def draw_distance_lines(self, robot, beacons: list[Beacon], color: str = "black"):
-        for beacon in beacons:
-            # Draw line between robot and beacon
-            pygame.draw.line(self.map, color, robot.pos, beacon.pos, 1)
-            
-            # Calculate distance in meters
-            distance_px = robot.pos.distance_to(beacon.pos)
-            distance_m = distance_px * SCALE
-            
-            # Position the text in the middle of the line
-            mid_point = (robot.pos + beacon.pos) / 2
-            text = f"{distance_m:.1f}m"
-            text_surface = self.font.render(text, True, color)
-            
-            # Draw a background for better readability
-            text_rect = text_surface.get_rect(center=(mid_point.x, mid_point.y))
-            pygame.draw.rect(self.map, "black", text_rect.inflate(4, 4))
-            self.map.blit(text_surface, text_rect)
-    
-    def draw_circles_op(self, robot, beacons: list[Beacon], color: str = "black"):
-        # RGBA color: (R, G, B, Alpha)
-        if isinstance(color, str):
-            rgb = pygame.Color(color)
-        else:
-            rgb = pygame.Color(*color)
-        rgba = (rgb.r, rgb.g, rgb.b, 32)
-        
-        for beacon in beacons:
-            if beacon.add_noise:
-                for i in range(3):
-                    i1 = scipy.stats.lognorm.interval(0.95 - 0.1*i, s=beacon.sigma_ln, scale=beacon.get_true_distance())
-                    r1 = int(i1[0])
-                    r2 = int(i1[1])
-
-                    radius = ( r1 + r2 ) // 2
-                    thickness = r2 - r1
-
-                    diameter = radius * 2 + thickness * 2 + 4 # + 4 for padding
-                    circle_surface = pygame.Surface((diameter, diameter), pygame.SRCALPHA)
-                    center = (diameter // 2 , diameter // 2 )
-
-                    pygame.draw.circle(circle_surface, rgba, center, radius + thickness // 2, width=thickness)
-
-                    # Blit the circle surface to the main UI surface
-                    blit_pos = beacon.pos - pygame.Vector2(diameter // 2, diameter // 2)
-                    self.map.blit(circle_surface, blit_pos)
-
-            else:
-                # Calculate distance for circle radius
-                thickness = int(beacon.noise)
-                radius = int(beacon.get_true_distance())
-
-                # Create a transparent surface large enough for the circle
-                diameter = radius * 2 + thickness * 2 + 4 # + 4 for padding
-                circle_surface = pygame.Surface((diameter, diameter), pygame.SRCALPHA)
-
-                # Circle center on the temp surface
-                center = (diameter // 2 , diameter // 2 )
-
-                # Draw the circle outline with transparency and thickness
-                pygame.draw.circle(circle_surface, rgba, center, radius + thickness // 2, width=thickness)
-
-                # Blit the circle surface to the main UI surface
-                blit_pos = beacon.pos - pygame.Vector2(diameter // 2, diameter // 2)
-                self.map.blit(circle_surface, blit_pos)
+        UI.draw_estimation(self.estimated_pos, cov, "red")
 
 def trilaterate(beacons: tuple[Beacon, Beacon, Beacon]) -> tuple[float, float]:
     """
@@ -320,63 +329,69 @@ def trilaterate(beacons: tuple[Beacon, Beacon, Beacon]) -> tuple[float, float]:
 
     return (x, y)
 
-def multilaterate(robot: Node, beacons: list[Beacon]) -> tuple[pygame.Vector2, float, float]:
-    estimates = [[],[]]
-    for i in itertools.combinations(beacons, 3):
-        est = trilaterate(i)
+def multilaterate(robot: Node, beacons: list[Beacon], discard_threeshold: float) -> tuple[npt.NDArray, npt.NDArray]:
+    """
+    Trilaterates with all combinations and then returns average and covariance
+    """
+    points = np.empty((0, 2))
 
-        if est[0] == None:
-            print("There are colinear beacons")
+    for i in itertools.combinations(beacons, 3):
+        new_point = trilaterate(i)
+
+        if new_point[0] == None:
+            print(f"The beacons {i} are colinear")
 
         else:
-            estimates[0].append(est[0])
-            estimates[1].append(est[1])
+            points = np.append(points, np.array([[new_point[0], new_point[1]]]), axis=0)
+
+    estimated_pos = np.mean(points, axis=0)
+
+    cov = np.cov(points.T)
+
+    return (estimated_pos, cov)
+
+def multilateration(map: pygame.Surface, robot: Node, beacons: list[Beacon], iterations: int, discard_threeshold: float) -> float: # Return real estimation error
+    """
+    Iterates a defined amount of times over the combinations of beacons for trilateration, then calculates the average position and draws it in the map
+    """
     
-    mean_pos = np.average(estimates, axis=1)
+    points = np.empty((0, 2))
 
-    estimated_pos = pygame.Vector2(float(mean_pos[0]), float(mean_pos[1]))
-    error = estimated_pos.distance_to(robot.pos)
-
-    # Calculate standar deviations to draw uncertainty ellipse
-
-    std_dev_x, std_dev_y = np.std(estimates, axis=1)
-
-    return (estimated_pos, float(std_dev_x), float(std_dev_y))
-
-
-def multilateration(map: pygame.Surface, robot: Node, beacons: list[Beacon], iterations: int, discard_threeshold: float) -> float:
-    est_x = []
-    est_y = []
-
-    for i in range(iterations):
-        estimate = multilaterate(robot, beacons)
-        if estimate[1] < discard_threeshold:
-            est_x.append(estimate[0][0])
-
-        if estimate[2] < discard_threeshold:
-            est_y.append(estimate[0][1])
-
-    if len(est_x) == 0.0 or len(est_y) == 0.0:
-        print("All on this lateration batch was discarted, measurements had too much noise")
+    if iterations > 1:
+        for i in range(iterations):
+            estimate = multilaterate(robot, beacons, discard_threeshold)[0]
+            points = np.append(points, np.array([[estimate[0], estimate[1]]]), axis=0)
+    elif iterations == 1:
+        points = multilaterate(robot, beacons, discard_threeshold)
+    
     else:
-        mean_x = float(np.average(est_x))
-        mean_y = float(np.average(est_y))
+        print("Invalid number of multilateration iterations")
 
-        std_dev_x = float(np.std(est_x))
-        std_dev_y = float(np.std(est_y))
+    if len(points) == 0:
+        print("All on this lateration batch was discarted, measurements had too much noise")
+    elif iterations == 1:
+        estimated_pos = pygame.Vector2(points[0][0], points[0][1])
+        UI.draw_estimation(estimated_pos, points[1], "green")
+        return estimated_pos.distance_to(robot.pos)
+    else:
+        estimated_pos = np.mean(points, axis=0)
+        estimated_pos = pygame.Vector2(estimated_pos[0], estimated_pos[1])
+        cov = np.cov(points.T)
 
-        pygame.draw.ellipse(map, "green", pygame.Rect(mean_x - std_dev_x // 2, mean_y - std_dev_y // 2, std_dev_x, std_dev_y), 2)
-        pygame.draw.circle(map, "green", (mean_x, mean_y), 4)
-        pygame.draw.line(map, "green", (mean_x, mean_y), (robot.pos.x, robot.pos.y), 2)
+        UI.draw_estimation(estimated_pos, cov, "green")
 
-        return np.sqrt((mean_x - robot.pos.x)**2 + (mean_y - robot.pos.y)**2)
+        # Draw point indicating estimate and a line from estimated to true position
+        pygame.draw.circle(map, "green", estimated_pos, 4)
+        pygame.draw.line(map, "green", robot.pos, estimated_pos, 2)
+
+        return estimated_pos.distance_to(robot.pos)
 
 robot = Node(pygame.Vector2(map.get_width() / 2, map.get_height() / 2), "red", 20, map)
 
-beacon1 = Beacon(pygame.Vector2(750, 160), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
-beacon2 = Beacon(pygame.Vector2(120, 520), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
-beacon3 = Beacon(pygame.Vector2(540, 835), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
-beacon4 = Beacon(pygame.Vector2(1500, 820), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
+beacon1 = Beacon(pygame.Vector2(750, 60), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
+beacon2 = Beacon(pygame.Vector2(120, 420), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
+beacon3 = Beacon(pygame.Vector2(540, 735), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
+beacon4 = Beacon(pygame.Vector2(1500, 720), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
 beacon5 = Beacon(pygame.Vector2(1600, 161), "blue", 10, map, robot, add_noise=True, tx_power=-50, path_loss_exponent=2.0)
 
 beacons = [beacon1, beacon2, beacon3, beacon4, beacon5]
@@ -387,7 +402,7 @@ particle_filter = ParticleFilter(num_particles=1500,
                                map_height=map.get_height(),
                                beacons=beacons)
 
-UI = UI(base, map)
+UI = UI(base, map, robot)
 
 draw_circles = True
 use_particle_filter = True
@@ -408,7 +423,9 @@ nodes = [
 
 recalculate_particles = True
 
-must_multilaterate = True
+use_multilateration = False
+use_single_sample_multilateration = True
+
 multilateration_error = None
 
 while running:
@@ -435,7 +452,10 @@ while running:
                 show_distance_lines = not show_distance_lines
                 must_redraw = True
             if event.key == pygame.K_t:
-                must_multilaterate = True
+                use_multilateration = True
+                must_redraw = True
+            if event.key == pygame.K_y:
+                use_single_sample_multilateration = not use_single_sample_multilateration
                 must_redraw = True
 
         if event.type == pygame.MOUSEBUTTONDOWN:
@@ -472,10 +492,10 @@ while running:
             i.draw()
 
         if draw_circles:
-            UI.draw_circles_op(robot, beacons, "black")
+            UI.draw_circles_op(beacons, "black")
         
         if show_distance_lines:
-            UI.draw_distance_lines(robot, beacons, "green")
+            UI.draw_distance_lines(beacons, "green")
     
         if use_particle_filter:
             if recalculate_particles:
@@ -487,24 +507,27 @@ while running:
             
             particle_filter.draw_estimate(map)
 
-            # Draw line from estimated to true position
-            pygame.draw.line(map, "red", robot.pos, estimated_pos, 2)
-
             UI.draw_text(f"Estimation error: {error*SCALE:.1f} meters", pygame.Vector2(800, 60))
 
-        if must_multilaterate:
-            multilateration_error = multilateration(map, robot, beacons, 5, 100)
+        if use_multilateration:
+            if use_single_sample_multilateration:
+                multilateration_error = multilateration(map, robot, beacons, 1, 100)
+            else:
+                multilateration_error = multilateration(map, robot, beacons, 5, 100)
+
+        if use_multilateration:
+            if multilateration_error == None:
+                UI.draw_text(f"Estimation error: Error", pygame.Vector2(1550, 60))
+            else:
+                UI.draw_text(f"Estimation error: {multilateration_error*SCALE:.1f}", pygame.Vector2(1550, 60))
 
         UI.draw_text("Press C to show/hide RSSI confidence circles", pygame.Vector2(10, 15))
         UI.draw_text("Press L to show/hide distance lines", pygame.Vector2(10, 45))
         UI.draw_text("Press P to toggle particle filter", pygame.Vector2(450, 15))
         UI.draw_text("Press S to show/hide particles", pygame.Vector2(450, 45))
-        UI.draw_text("Press T to multilaterate", pygame.Vector2(1670, 45))
+        UI.draw_text("Press T to toggle multilateration", pygame.Vector2(1250, 60))
+        UI.draw_text(f"Multiple sampling multilateration {"OFF" if use_single_sample_multilateration else "ON"} press Y to toggle", pygame.Vector2(1250, 30))
 
-        if multilateration_error == None:
-            UI.draw_text(f"Estimation error: Error", pygame.Vector2(1670, 70))
-        else:
-            UI.draw_text(f"Estimation error: {multilateration_error*SCALE:.1f}", pygame.Vector2(1670, 70))
 
     mouse_pos = pygame.mouse.get_pos()
 
