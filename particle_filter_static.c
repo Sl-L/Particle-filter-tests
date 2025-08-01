@@ -1,25 +1,12 @@
+#include "particle_filter_static.h"
+
 #include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#define _USE_MATH_DEFINES
+#define M_PI 3.1415926
+
 #include <math.h>
-
-
-typedef struct {
-    float x;
-    float y;
-} Point;
-
-typedef struct {
-    Point pos;
-    float weight;
-} Particle;
-
-typedef struct {
-    Point min;
-    Point max;
-} Area;
 
 float rand_uniform(float min, float max) {
     return min + (max - min) * (rand() / (float)RAND_MAX);
@@ -82,7 +69,7 @@ void predict_motion(const Point *v, const Area *map, Particle *particles[], int 
 void update_weights(Particle *particles[], int particle_count,
                     Point beacons[], int beacon_count,
                     float path_loss_exponent, float d0,
-                    float RSSI0, float RSSI_noise_std,
+                    float RSSI_0, float RSSI_noise_std,
                     float measurement_RSSI[],
                     float temp_weights[]
                 ) {
@@ -98,7 +85,7 @@ void update_weights(Particle *particles[], int particle_count,
             float d = distance(&particles[i]->pos, &beacons[j]);
             if (d < 0.1f) d = 0.1f;  // Avoid division by very small numbers
             
-            float expected_rssi = RSSI0 - 10.0f * path_loss_exponent * log10f(d / d0);
+            float expected_rssi = RSSI_0 - 10.0f * path_loss_exponent * log10f(d / d0);
             float rssi_diff = measurement_RSSI[j] - expected_rssi;
             log_likelihood += -0.5f * (rssi_diff * rssi_diff) / (RSSI_noise_std * RSSI_noise_std);
         }
@@ -129,13 +116,13 @@ void update_weights(Particle *particles[], int particle_count,
     }
 }
 
-int binary_search(float *cumulative_weights, int size, float value) {
+int binary_search(float *cumulative_weights, int size, float threshold) {
     int low = 0;
     int high = size - 1;
 
     while (low < high) {
         int mid = (low + high) / 2;
-        if (value > cumulative_weights[mid]) {
+        if (threshold > cumulative_weights[mid]) {
             low = mid + 1;
         } else {
             high = mid;
